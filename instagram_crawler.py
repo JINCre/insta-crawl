@@ -8,14 +8,17 @@ import os
 class InstagramCrawler:
     def __init__(self):
         self.loader = instaloader.Instaloader()
-        # User-Agent 설정하여 봇 탐지 회피
-        self.loader.context.user_agent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
+        # 더 안전한 User-Agent 설정과 추가 옵션
+        self.loader.context.user_agent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        # 요청 간격 설정 (Instagram 제한 회피)
+        self.loader.context.request_timeout = 60
+        self.loader.context.max_connection_attempts = 3
         
     async def get_influencer_info(self, username: str) -> Dict[str, Any]:
         """인플루언서의 정보를 크롤링합니다."""
         try:
-            # 프로필 가져오기
-            profile = instaloader.Profile.from_username(self.loader.context, username)
+            # 재시도 로직으로 프로필 가져오기
+            profile = await self._get_profile_with_retry(username)
             
             # 기본 정보
             basic_info = {
@@ -47,10 +50,31 @@ class InstagramCrawler:
             
         except instaloader.exceptions.ProfileNotExistsException:
             raise ValueError(f"사용자 '{username}'을(를) 찾을 수 없습니다.")
-        except instaloader.exceptions.ConnectionException:
-            raise ValueError("Instagram에 연결할 수 없습니다. 잠시 후 다시 시도해주세요.")
+        except instaloader.exceptions.LoginRequiredException:
+            raise ValueError("이 계정은 비공개 계정이거나 Instagram에서 접근을 제한했습니다.")
+        except instaloader.exceptions.ConnectionException as e:
+            if "401" in str(e):
+                raise ValueError("Instagram에서 접근을 거부했습니다. 잠시 후 다시 시도해주세요.")
+            else:
+                raise ValueError("Instagram에 연결할 수 없습니다. 네트워크를 확인해주세요.")
         except Exception as e:
-            raise ValueError(f"프로필 정보를 가져오는 중 오류가 발생했습니다: {str(e)}")
+            if "401" in str(e):
+                raise ValueError("Instagram에서 접근을 거부했습니다. 현재 많은 요청으로 인해 일시적으로 제한되었을 수 있습니다.")
+            else:
+                raise ValueError(f"프로필 정보를 가져오는 중 오류가 발생했습니다: {str(e)}")
+    
+    async def _get_profile_with_retry(self, username: str, max_retries: int = 3):
+        """재시도 로직이 포함된 프로필 가져오기"""
+        for attempt in range(max_retries):
+            try:
+                await asyncio.sleep(attempt * 2)  # 지연 시간 증가
+                profile = instaloader.Profile.from_username(self.loader.context, username)
+                return profile
+            except Exception as e:
+                if attempt == max_retries - 1:  # 마지막 시도
+                    raise e
+                print(f"프로필 가져오기 시도 {attempt + 1} 실패: {str(e)}")
+                await asyncio.sleep(5)  # 재시도 전 5초 대기
     
     async def _analyze_posts(self, profile, limit: int = 20) -> Dict[str, Any]:
         """게시물들을 분석하여 평균 인게이지먼트를 계산합니다."""
@@ -83,8 +107,8 @@ class InstagramCrawler:
                     total_comments += comments
                     post_count += 1
                 
-                # API 제한을 피하기 위한 지연
-                await asyncio.sleep(0.5)
+                # API 제한을 피하기 위한 지연 (더 긴 시간)
+                await asyncio.sleep(2.0)
         
         except Exception as e:
             print(f"게시물 분석 중 오류: {str(e)}")
@@ -143,8 +167,8 @@ class InstagramCrawler:
                     total_video_views += video_views
                     reels_count += 1
                 
-                # API 제한을 피하기 위한 지연
-                await asyncio.sleep(0.5)
+                # API 제한을 피하기 위한 지연 (더 긴 시간)
+                await asyncio.sleep(2.0)
         
         except Exception as e:
             print(f"릴스 분석 중 오류: {str(e)}")

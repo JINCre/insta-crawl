@@ -8,6 +8,10 @@ import os
 
 app = FastAPI(title="Instagram Influencer Crawler", version="1.0.0")
 
+# 디렉토리 생성 확인
+os.makedirs("static", exist_ok=True)
+os.makedirs("templates", exist_ok=True)
+
 # 정적 파일과 템플릿 설정
 app.mount("/static", StaticFiles(directory="static"), name="static")
 templates = Jinja2Templates(directory="templates")
